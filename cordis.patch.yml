@@ -1,0 +1,4 @@
+- insert:
+    - id: toolbox
+      name: 'dsh-ui-toolbox'
+      config: {}

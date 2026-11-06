@@ -1,0 +1,64 @@
+{
+  "name": "dsh-ui-toolbox",
+  "version": "0.2.0",
+  "type": "module",
+  "main": "./index.js",
+  "description": "A resident UI toolbox for DeepSeek Harness. Its element picker captures any app element's React component, CSS selector, box, text and key styles, copies the context, and can insert it straight into the composer.",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "toolbox",
+    "element-picker",
+    "ui",
+    "inspector"
+  ],
+  "author": {
+    "name": "miniluckybull",
+    "url": "https://github.com/miniluckybull"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/miniluckybull/dsh-ui-toolbox.git"
+  },
+  "homepage": "https://github.com/miniluckybull/dsh-ui-toolbox#readme",
+  "bugs": {
+    "url": "https://github.com/miniluckybull/dsh-ui-toolbox/issues"
+  },
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

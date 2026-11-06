@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Toolbox",
+    "description": "A resident tool tray at the sidebar foot (bottom-left, above Settings); future tools join it as more icon buttons. The current tool, Element Picker: click the tray icon to pick, hover the live UI to highlight any element, use ↑/↓ to move between parent and child, and click to capture. Esc or a second click on the icon exits. The capture records the React component, CSS selector, size, text, attributes and key computed styles and copies it to the clipboard. The toast's Insert action writes that context straight into the current composer so a change request can follow."
+  }
+}
