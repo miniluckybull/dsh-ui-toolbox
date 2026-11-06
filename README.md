@@ -2,9 +2,9 @@
 
 [![npm](https://img.shields.io/npm/v/dsh-ui-toolbox.svg)](https://www.npmjs.com/package/dsh-ui-toolbox)
 
-A resident UI toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It sits at the sidebar foot (bottom-left, above Settings) as a compact tray. Its first tool, the **Element Picker**, captures any element of the live Web UI — React component, CSS selector, box, text, attributes and key computed styles — copies the context to the clipboard, or inserts it straight into the current composer so a change request can follow.
+A resident UI toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It sits at the bottom-left, above the sidebar Settings row, as a compact tray, and paints above host modals (the Settings dialog included), so it stays usable while Settings is open. Its first tool, the **Element Picker**, captures any element of the live Web UI — React component, CSS selector, box, text, attributes and key computed styles — copies the context to the clipboard, or inserts it straight into the current composer so a change request can follow.
 
-DSH Web 界面左下角的**常驻工具托盘**。托盘位于侧边栏底部、设置上方：每个工具一个图标按钮，鼠标悬浮显示一句短提示；功能细节写在插件说明（`locale/*.json` 的 `meta.description`）里，托盘本身不占地方。当前工具是**选取元素**。
+DSH Web 界面左下角的**常驻工具托盘**。托盘位于侧边栏底部、设置上方：每个工具一个图标按钮，鼠标悬浮显示一句短提示；功能细节写在插件说明（`locale/*.json` 的 `meta.description`）里，托盘本身不占地方。托盘渲染在一个浮于宿主模态之上的 body portal 里，所以**打开设置窗口后仍然可用**，也可以直接采集设置面板里的元素。当前工具是**选取元素**。
 
 ## 安装 · Install
 
@@ -48,7 +48,7 @@ Tested on DSH `0.2.1-rc.2`. The bundle declares `engines.dsh: ">=0.2.1-rc.2 <0.3
 
 | 文件 | 作用 |
 | --- | --- |
-| `client.js` | 全部浏览器侧实现：常驻托盘、元素选取器、提示/高亮/toast、输入框桥接 |
+| `client.js` | 全部浏览器侧实现：常驻托盘、元素选取器、提示/高亮/toast、输入框桥接；托盘与瞬态 UI 通过 body portal 浮在宿主模态之上 |
 | `index.js` | Host 半部，无资源（不需要服务端能力） |
 | `cordis.patch.yml` | 插入 `toolbox` 插件行 |
 | `locale/*.json` | 插件管理页的标题与详细说明（中/英） |
@@ -56,17 +56,20 @@ Tested on DSH `0.2.1-rc.2`. The bundle declares `engines.dsh: ">=0.2.1-rc.2 <0.3
 
 挂载的槽位：
 
-- `sidebar.footer.action`：左下角常驻托盘；
-- `shell.overlay`：高亮框、悬浮提示、选取提示条与 toast（浮层整层点击穿透，只有提示条/toast 自己接收指针）；
+- `shell.overlay`：唯一的 UI 宿主。它把一个 body portal 挂到 `document.body`，portal 里包含托盘、悬浮提示、高亮框、选取提示条与 toast；元素 z-index 在宿主模态（设置窗口 `z-index: 1000`）之上，因此打开设置也能用。portal 里的元素各自 `pointer-events` 自理，不会挡住应用。
 - `conversation.composer.dock`：零高度桥接组件，把当前会话的 `InputActions` 暴露给根级 toast，实现「插入对话框」。
 
 ## 后续加工具
 
-托盘是数据驱动的：在 `client.js` 的 `ToolboxTray` 里给 `tools` 数组追加一项（`label` / `icon` / `run`）就多一个图标按钮，悬浮提示和布局会自动复用它。需要更多瞬态 UI 时继续往 `ToolboxOverlay` 里挂即可。
+托盘是数据驱动的：在 `client.js` 的 `ToolboxTray` 里给 `tools` 数组追加一项（`label` / `icon` / `run`）就多一个图标按钮，悬浮提示和布局会自动复用它。需要更多瞬态 UI 时继续往 `ToolboxHost` 里挂即可。
+
+## 层级说明
+
+宿主设置窗口是一个直接 portal 到 `document.body` 的模态层（`position: fixed; inset: 0; z-index: 1000`）。普通 `shell.overlay` 只在应用框内、z-index 20，会被设置层盖住。因此本插件同样用 React `createPortal` 把 UI 挂到 `document.body`，托盘/高亮/提示条/toast 的 z-index 设在 1100–1105，浮在设置层之上；portal 随组件卸载自动移除，不残留 DOM。
 
 ## 约束
 
-- 只用 `react` 一个运行时模块，不 import 任何 Harness Client 包；
+- 运行时只用 `react` 和 `react-dom`（`createPortal`），不 import 任何 Harness Client 包；
 - 颜色/圆角/阴影全部取自 `--dsw-*` 主题 token（暗色、亮色自动适配）；
 - 所有文字走 `toolbox` locale 命名空间（中/英）；
 - 文档级监听器、定时器、样式都随 `ctx.effect` / React 卸载清理；采集期间临时挂在 `<html>` 上的 `data-dsh-toolbox-picking`（全屏十字光标）也会在退出时移除。

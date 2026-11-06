@@ -2,11 +2,14 @@
  * DSH UI Toolbox — browser half (dsh-ui-toolbox).
  *
  * Surfaces:
- *   1. sidebar.footer.action id "toolbox"        — the resident tool tray above Settings:
- *                                                  one icon button per tool, hover tooltip
- *   2. shell.overlay        id "toolbox"         — pick highlight, hover tooltip, picking
- *                                                  hint and the result toast
- *   3. conversation.composer.dock id "toolbox-bridge" — publishes the session's
+ *   1. shell.overlay        id "toolbox"         — hosts one body portal containing the
+ *                                                  resident tray, the pick highlight,
+ *                                                  hover tooltip, picking hint and the
+ *                                                  result toast. The portal sits above
+ *                                                  host modals (the Settings dialog uses
+ *                                                  z-index 1000), so the tray and picker
+ *                                                  stay usable with Settings open.
+ *   2. conversation.composer.dock id "toolbox-bridge" — publishes the session's
  *                                                  InputActions so the toast can insert the
  *                                                  captured element context into the composer
  *
@@ -19,13 +22,16 @@
  * (the plugin inventory entry); the tray itself only carries the icon, a short tooltip
  * and transient picking/result feedback.
  *
- * Constraints: one browser-global file, no JSX, `react` is the only module required at
- * runtime, no harness package imports, colors exclusively through --dsw-* theme tokens.
+ * Constraints: one browser-global file, no JSX, `react` and `react-dom` are the only
+ * modules required at runtime, no harness package imports, colors exclusively through
+ * --dsw-* theme tokens. The body portal mirrors the host's own modal pattern; it is the
+ * only way to paint above a host modal that portals itself to document.body.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-ui-toolbox',
   factory(require) {
     const React = require('react')
+    const ReactDOM = require('react-dom')
     const h = React.createElement
     const NS = 'toolbox'
 
@@ -133,20 +139,22 @@ window.__ModuleLoader__.load({
 
     const CSS = `
 .dsh-toolbox-tray {
+  position: fixed;
+  z-index: 1102;
+  left: 12px;
+  bottom: 54px;
   box-sizing: border-box;
   display: inline-flex;
   flex: none;
   flex-direction: row;
   align-items: center;
   gap: 2px;
-  margin: 0 2px 6px;
   padding: 2px;
   border: 1px solid var(--dsw-alias-border-l1);
   border-radius: var(--dsw-radius-md);
   background: var(--dsw-alias-button-elevated-fill);
   box-shadow: var(--dsw-elevation-soft);
 }
-.dsh-toolbox-tray-collapsed { flex-direction: column; margin: 0 0 6px; }
 .dsh-toolbox-tool {
   display: inline-flex;
   align-items: center;
@@ -172,7 +180,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-tip {
   position: fixed;
-  z-index: 45;
+  z-index: 1103;
   padding: 4px 8px;
   border-radius: var(--dsw-radius-xs);
   background: var(--dsw-alias-tooltip-bg);
@@ -190,7 +198,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-highlight {
   position: fixed;
-  z-index: 41;
+  z-index: 1100;
   box-sizing: border-box;
   border: 2px solid var(--dsw-alias-state-business-primary);
   border-radius: 3px;
@@ -200,7 +208,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-highlight-label {
   position: fixed;
-  z-index: 42;
+  z-index: 1101;
   overflow: hidden;
   max-width: 320px;
   padding: 3px 7px;
@@ -217,7 +225,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-pickbar {
   position: fixed;
-  z-index: 43;
+  z-index: 1104;
   top: 16px;
   left: 50%;
   display: flex;
@@ -257,7 +265,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-toast {
   position: fixed;
-  z-index: 44;
+  z-index: 1105;
   top: 14px;
   left: 50%;
   display: flex;
@@ -818,8 +826,10 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     }
 
     /**
-     * The resident tray at the sidebar foot. One cell per tool; the icon is the
-     * whole entry, the short label lives in the hover tooltip.
+     * The resident tray. It lives in the body portal hosted by {@link ToolboxHost},
+     * pinned to the bottom-left above the sidebar Settings row, so it also stays
+     * reachable while a host modal such as Settings is open. One cell per tool; the
+     * icon is the whole entry, the short label lives in the hover tooltip.
      */
     function ToolboxTray(props) {
       const t = typeof props.t === 'function' ? props.t : function fallback(key) { return key }
@@ -847,7 +857,7 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       return h(
         'div',
         {
-          className: 'dsh-toolbox-tray' + (props.wide === false ? ' dsh-toolbox-tray-collapsed' : ''),
+          className: 'dsh-toolbox-tray',
           role: 'toolbar',
           'aria-label': t('tray.label'),
           'data-dsh-toolbox-ui': ''
@@ -892,7 +902,13 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       return null
     }
 
-    function ToolboxOverlay(props) {
+    /**
+     * Frame-wide toolbox surface. It renders through a body portal (the same
+     * technique the host Settings dialog uses) so the tray, highlight, tooltip,
+     * picking hint and toast paint above host modals; without the portal the
+     * Settings dialog's z-index-1000 layer would cover the whole toolbox.
+     */
+    function ToolboxHost(props) {
       const t = typeof props.t === 'function' ? props.t : function fallback(key) { return key }
       const snapshot = useStore()
       const tRef = React.useRef(t)
@@ -1197,14 +1213,18 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
         )
       }
 
-      return h(
-        React.Fragment,
-        null,
-        h('style', { key: 'style' }, CSS),
-        snapshot.picking ? renderPickBar() : null,
-        snapshot.picking ? renderHighlight() : null,
-        renderTip(),
-        renderToast()
+      return ReactDOM.createPortal(
+        h(
+          React.Fragment,
+          null,
+          h('style', { key: 'style' }, CSS),
+          h(ToolboxTray, { key: 'tray', t: t }),
+          snapshot.picking ? renderPickBar() : null,
+          snapshot.picking ? renderHighlight() : null,
+          renderTip(),
+          renderToast()
+        ),
+        document.body
       )
     }
     //#endregion
@@ -1221,22 +1241,7 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
 
         const t = ctx.locale.bind(NS)
 
-        ctx.slots.inject('sidebar.footer.action', function injectTray() {
-          return ctx.slots.register(
-            {
-              name: 'sidebar.footer.action',
-              id: 'toolbox',
-              order: 5,
-              locale: NS,
-              label: function label() {
-                return t('tray.label')
-              }
-            },
-            ToolboxTray
-          )
-        })
-
-        ctx.slots.inject('shell.overlay', function injectOverlay() {
+        ctx.slots.inject('shell.overlay', function injectHost() {
           return ctx.slots.register(
             {
               name: 'shell.overlay',
@@ -1244,7 +1249,7 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
               order: 20,
               locale: NS
             },
-            ToolboxOverlay
+            ToolboxHost
           )
         })
 
