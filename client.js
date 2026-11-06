@@ -10,13 +10,23 @@
  *                                                  z-index 1000), so the tray and picker
  *                                                  stay usable with Settings open.
  *   2. conversation.composer.dock id "toolbox-bridge" — publishes the session's
- *                                                  InputActions so the toast can insert the
- *                                                  captured element context into the composer
+ *                                                  InputActions + session id so a capture
+ *                                                  can insert a compact reference chip
+ *                                                  into the composer.
+ *   3. conversation.user.text.node key "elementRef" — renders one captured element in a
+ *                                                  user message as a small chip instead of
+ *                                                  the full context block; the model text
+ *                                                  is unchanged.
+ *   Plus two root services: an `@` input-trigger source named "element" (chip codec that
+ *   resolves the captured context at submit time) and a user-text rule that folds the
+ *   serialized block back into the chip.
  *
  * Current tool: element picker. Click the tray icon, then hover the live UI (ArrowUp /
  * ArrowDown moves between parent and first child); a click captures the element's React
- * component chain, CSS selector, box, text, attributes and key computed styles, copies
- * that context to the clipboard and offers a one-click insert into the composer.
+ * component chain, CSS selector, box, text, attributes and key computed styles and inserts
+ * a compact `@label` chip into the current composer. The full context is stored locally and
+ * travels with the message for the model, while the conversation shows only the chip. When
+ * no composer is available the full reference is copied to the clipboard instead.
  *
  * The detailed feature description lives in this bundle's locale `meta.description`
  * (the plugin inventory entry); the tray itself only carries the icon, a short tooltip
@@ -42,12 +52,10 @@ window.__ModuleLoader__.load({
       'tool.exit': '退出选取',
       'picking.hint': '单击采集 · ↑↓ 切换层级 · Esc 取消',
       'picking.cancel': '退出选取',
-      'toast.copied': '已复制元素上下文',
-      'toast.copyFailed': '复制失败，可改用插入',
-      'toast.insert': '插入对话框',
-      'toast.inserted': '已插入对话框，接着写修改要求',
-      'toast.insertFallback': '插入失败，已复制到剪贴板',
-      'toast.noComposer': '没有会话输入框，已复制到剪贴板',
+      'toast.elementAdded': '已添加元素引用',
+      'toast.elementCopied': '已复制元素引用',
+      'toast.copyFailed': '复制失败，请重试',
+      'toast.noComposer': '没有会话输入框，已复制元素引用',
       'ctx.element': '元素',
       'ctx.component': '组件',
       'ctx.selector': '选择器',
@@ -57,7 +65,6 @@ window.__ModuleLoader__.load({
       'ctx.styles': '关键样式',
       'ctx.html': '结构',
       'ctx.ancestors': '祖先链',
-      'ctx.request': '修改要求：',
       'ctx.title': '（以下内容由 DSH 工具箱的元素选取器采集，来自当前 Web 界面）'
     }
 
@@ -67,12 +74,10 @@ window.__ModuleLoader__.load({
       'tool.exit': 'Stop picking',
       'picking.hint': 'Click to capture · ↑↓ change level · Esc to cancel',
       'picking.cancel': 'Stop picking',
-      'toast.copied': 'Element context copied',
-      'toast.copyFailed': 'Copy failed — try Insert instead',
-      'toast.insert': 'Insert into composer',
-      'toast.inserted': 'Inserted into the composer — type your change request',
-      'toast.insertFallback': 'Could not insert, copied to the clipboard',
-      'toast.noComposer': 'No composer available, copied to the clipboard',
+      'toast.elementAdded': 'Element reference added',
+      'toast.elementCopied': 'Element reference copied',
+      'toast.copyFailed': 'Copy failed, please retry',
+      'toast.noComposer': 'No composer available, element reference copied',
       'ctx.element': 'element',
       'ctx.component': 'component',
       'ctx.selector': 'selector',
@@ -82,7 +87,6 @@ window.__ModuleLoader__.load({
       'ctx.styles': 'key styles',
       'ctx.html': 'markup',
       'ctx.ancestors': 'ancestors',
-      'ctx.request': 'Change request: ',
       'ctx.title': '(captured by the DSH Toolbox element picker from the live Web UI)'
     }
     //#endregion
@@ -92,9 +96,7 @@ window.__ModuleLoader__.load({
       picking: false,
       candidate: null,
       tip: null,
-      toast: null,
-      lastCapture: null,
-      draftReady: false
+      toast: null
     }
 
     const STYLE_KEYS = [
@@ -285,26 +287,22 @@ window.__ModuleLoader__.load({
   animation: dsh-toolbox-toast-enter 0.16s var(--ds-ease-in-out, ease-out);
   pointer-events: none;
 }
-.dsh-toolbox-toast.is-actionable { pointer-events: auto; }
 .dsh-toolbox-toast-icon { display: inline-flex; flex: none; }
 .dsh-toolbox-toast-error .dsh-toolbox-toast-icon { color: var(--dsw-alias-state-error-primary); }
-.dsh-toolbox-toast-action {
-  flex: none;
-  padding: 0 0 0 2px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 2px;
-  cursor: pointer;
+.dsh-toolbox-element-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  max-width: 240px;
+  padding: 0 4px;
+  border-radius: var(--dsw-radius-xs);
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+  line-height: inherit;
+  vertical-align: baseline;
 }
-.dsh-toolbox-toast-action:hover { opacity: 0.8; }
-.dsh-toolbox-toast-action:focus-visible {
-  outline: var(--dsw-focus-ring-width, 2px) solid var(--dsw-focus-ring-color, var(--dsw-alias-state-business-primary));
-  outline-offset: 1px;
-}
+.dsh-toolbox-element-chip-icon { display: inline-flex; flex: none; color: var(--dsw-alias-state-business-primary); }
+.dsh-toolbox-element-chip-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
 @keyframes dsh-toolbox-toast-enter {
   from { opacity: 0; transform: translate(-50%, -6px); }
@@ -342,10 +340,10 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       })
     }
 
-    /** Show one toast. `action` optionally names the click action it offers. */
-    function notify(text, kind, action) {
+    /** Show one short toast. */
+    function notify(text, kind) {
       const seq = (state.toast && state.toast.seq ? state.toast.seq : 0) + 1
-      update({ toast: { text: text, kind: kind || 'info', seq: seq, action: action || null } })
+      update({ toast: { text: text, kind: kind || 'info', seq: seq } })
     }
 
     /** Session input actions published by the composer bridge, if mounted. */
@@ -364,6 +362,183 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       )
       return snapshot
     }
+    //#endregion
+
+    //#region element references
+    /**
+     * Captured element contexts are referenced from the composer by a short id.
+     * The composer keeps a chip (`@label`); the model form is the full context
+     * wrapped in a marker the chat user-text rule collapses back to a chip.
+     */
+    const ELEMENT_REF_KEY = 'dsh-ui-toolbox.elements.v1'
+    const ELEMENT_REF_LIMIT = 100
+    const ELEMENT_REF_TTL_MS = 7 * 24 * 60 * 60 * 1000
+    const elementRefs = new Map()
+    let sessionsService = null
+
+    function sanitizeElementLabel(value) {
+      const text = String(value == null ? '' : value)
+        .replace(/[\[\]|\r\n]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+      if (text.length === 0) return '元素'
+      return text.length > 36 ? text.slice(0, 35) + '…' : text
+    }
+
+    function elementLabelForInfo(info) {
+      return sanitizeElementLabel(info.ariaLabel || info.text || info.tag || '元素')
+    }
+
+    function makeElementRefId() {
+      return 'el-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+    }
+
+    function pruneElementRefs() {
+      const cutoff = Date.now() - ELEMENT_REF_TTL_MS
+      const kept = Array.from(elementRefs.values())
+        .filter(function alive(entry) {
+          return entry && entry.at >= cutoff
+        })
+        .sort(function oldestFirst(a, b) {
+          return a.at - b.at
+        })
+      const tail = kept.slice(Math.max(0, kept.length - ELEMENT_REF_LIMIT))
+      elementRefs.clear()
+      tail.forEach(function restore(entry) {
+        elementRefs.set(entry.id, entry)
+      })
+    }
+
+    function persistElementRefs() {
+      try {
+        pruneElementRefs()
+        window.localStorage.setItem(ELEMENT_REF_KEY, JSON.stringify(Array.from(elementRefs.values())))
+      } catch (error) {
+        /* the in-memory map remains authoritative */
+      }
+    }
+
+    function loadElementRefs() {
+      try {
+        const raw = window.localStorage.getItem(ELEMENT_REF_KEY)
+        if (!raw) return
+        const parsed = JSON.parse(raw)
+        if (!Array.isArray(parsed)) return
+        for (const entry of parsed) {
+          if (!entry || typeof entry.id !== 'string' || typeof entry.label !== 'string' || typeof entry.text !== 'string') continue
+          elementRefs.set(entry.id, {
+            id: entry.id,
+            label: sanitizeElementLabel(entry.label),
+            text: entry.text,
+            at: typeof entry.at === 'number' ? entry.at : Date.now()
+          })
+        }
+        pruneElementRefs()
+      } catch (error) {
+        /* ignore corrupt local state */
+      }
+    }
+
+    function rememberElementRef(info, text) {
+      const entry = { id: makeElementRefId(), label: elementLabelForInfo(info), text: text, at: Date.now() }
+      elementRefs.set(entry.id, entry)
+      persistElementRefs()
+      return entry
+    }
+
+    function elementRefOf(id) {
+      return elementRefs.get(id) || null
+    }
+
+    function elementClipboardText(ref) {
+      const entry = elementRefOf(ref)
+      return '@' + (entry ? entry.label : ref)
+    }
+
+    function serializeElementRef(entry) {
+      return '[[' + 'el:' + entry.id + '|' + entry.label + ']]\n' + entry.text
+    }
+
+    /**
+     * Insert one composer reference chip through the scoped input event. The
+     * chip carries the short ref; submit time resolves the full context through
+     * the element source codec.
+     */
+    function insertElementChip(id, label) {
+      const actions = bridge.inputActions
+      if (!actions) return 'no-composer'
+      let scope = null
+      try {
+        scope = sessionsService && bridge.sessionId ? sessionsService.scope(bridge.sessionId) : null
+      } catch (error) {
+        scope = null
+      }
+      if (!scope || typeof scope.bail !== 'function') return 'no-composer'
+      const reference = {
+        source: 'element',
+        ref: id,
+        label: label,
+        clipboardText: elementClipboardText(id)
+      }
+      try {
+        // Bail dispatch mirrors the host's own insertion path; it runs the
+        // session's scoped listener synchronously and returns true when the
+        // composer applied the edit.
+        let span = actions.captureInsertion()
+        if (scope.bail(scope, 'slash/input-insert-reference', { reference: reference, span: span }) === true) return 'inserted'
+        span = actions.captureInsertion()
+        if (scope.bail(scope, 'slash/input-insert-reference', { reference: reference, span: span }) === true) return 'inserted'
+      } catch (error) {
+        return 'failed'
+      }
+      return 'failed'
+    }
+
+    /** Collapse one serialized element block back to a compact chat chip. */
+    const elementTextRule = {
+      id: 'elementRef',
+      order: 20,
+      match(text, from) {
+        const marker = /\[\[el:([a-z0-9-]+)\|([^\]\n]*)\]\]/g
+        marker.lastIndex = from
+        const found = marker.exec(text)
+        if (!found) return undefined
+        const endToken = '</selected-element>'
+        const close = text.indexOf(endToken, found.index)
+        if (close < 0) return undefined
+        return {
+          id: 'elementRef',
+          start: found.index,
+          end: close + endToken.length,
+          data: { id: found[1], label: found[2] || found[1] }
+        }
+      }
+    }
+
+    /** The `@` source owning element chips; serialization reads the captured context. */
+    const elementSource = {
+      trigger: '@',
+      name: 'element',
+      showGroupTitle: false,
+      async candidates() {
+        return []
+      },
+      onPick() {
+        return undefined
+      },
+      codec: {
+        clipboardText(ref) {
+          return elementClipboardText(ref)
+        },
+        serialize(ref) {
+          const entry = elementRefOf(ref)
+          if (!entry) return Promise.resolve('[[' + 'el:' + ref + ']]')
+          return Promise.resolve(serializeElementRef(entry))
+        }
+      }
+    }
+
+    loadElementRefs()
     //#endregion
 
     //#region element inspection helpers
@@ -751,6 +926,23 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
 
     //#region components
     /**
+     * Chat presentation for one captured element: a compact chip. The message
+     * text still carries the full context for the model; this renderer only
+     * changes how the user message is displayed.
+     */
+    function ElementReference(props) {
+      const node = props.node || {}
+      const data = node.data || {}
+      const label = data.label || data.id || '元素'
+      return h(
+        'span',
+        { className: 'dsh-toolbox-element-chip', title: label, 'data-dsh-toolbox-ui': '' },
+        h('span', { className: 'dsh-toolbox-element-chip-icon' }, h(IconCrosshair, { size: 12 })),
+        h('span', { className: 'dsh-toolbox-element-chip-label' }, label)
+      )
+    }
+
+    /**
      * One tray button. Owns only its hover/focus tooltip delay; pressing is the
      * tool's, so adding another tool is another descriptor in the tray.
      */
@@ -875,9 +1067,9 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     }
 
     /**
-     * Zero-height companion in the composer dock. Its only job is publishing the
-     * session's stable InputActions face so the root-scope toast can insert text
-     * into the resident composer of the current session.
+     * Zero-height companion in the composer dock. It publishes the session's
+     * stable InputActions face so the frame-wide tray can insert element
+     * reference chips into the resident composer of the current session.
      */
     function ComposerBridge(props) {
       const actions = props.inputActions || null
@@ -887,12 +1079,10 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
         function bindComposer() {
           bridge.inputActions = actions
           bridge.sessionId = sessionId
-          update({ draftReady: actions !== null })
           return function unbindComposer() {
             if (bridge.inputActions === actions) {
               bridge.inputActions = null
               bridge.sessionId = null
-              update({ draftReady: false })
             }
           }
         },
@@ -970,19 +1160,29 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
             const info = collectElementInfo(el)
             if (!info) return
             const text = formatContext(info, translate)
-            update({
-              picking: false,
-              candidate: null,
-              tip: null,
-              lastCapture: { text: text, label: info.label }
-            })
+            const entry = rememberElementRef(info, text)
+            update({ picking: false, candidate: null, tip: null })
             swallowUntil = Date.now() + 600
-            copyText(text).then(function copied(ok) {
-              const hasComposer = bridge.inputActions !== null
-              let messageKey = 'toast.copyFailed'
-              if (ok && hasComposer) messageKey = 'toast.copied'
-              else if (ok) messageKey = 'toast.noComposer'
-              notify(tRef.current(messageKey), ok ? 'success' : 'error', hasComposer ? 'insert' : null)
+            const outcome = insertElementChip(entry.id, entry.label)
+            if (outcome === 'inserted') {
+              notify(tRef.current('toast.elementAdded'), 'success')
+              // Move focus back to the composer so the user can type the
+              // change request right after the chips.
+              window.requestAnimationFrame(function focusComposer() {
+                const editor = document.querySelector('[data-composer-input]')
+                if (editor && typeof editor.focus === 'function') {
+                  try {
+                    editor.focus({ preventScroll: true })
+                  } catch (error) {
+                    /* focus is a nicety */
+                  }
+                }
+              })
+              return
+            }
+            copyText(serializeElementRef(entry)).then(function copied(ok) {
+              const messageKey = ok ? (outcome === 'no-composer' ? 'toast.noComposer' : 'toast.elementCopied') : 'toast.copyFailed'
+              notify(tRef.current(messageKey), ok ? 'info' : 'error')
             })
           }
 
@@ -1077,47 +1277,6 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
         [tipVisible]
       )
 
-      function insertCaptured() {
-        const capture = state.lastCapture
-        if (!capture) return
-        const actions = bridge.inputActions
-        const text = capture.text + '\n\n' + t('ctx.request')
-        if (!actions) {
-          copyText(text).then(function copied(ok) {
-            notify(ok ? t('toast.noComposer') : t('toast.copyFailed'), ok ? 'info' : 'error')
-          })
-          return
-        }
-        let inserted = false
-        try {
-          const span = actions.captureInsertion()
-          inserted = actions.insertText(text, span) === true
-          if (!inserted) {
-            const retry = actions.captureInsertion()
-            inserted = actions.insertText(text, retry) === true
-          }
-        } catch (error) {
-          inserted = false
-        }
-        if (!inserted) {
-          copyText(text).then(function copied(ok) {
-            notify(ok ? t('toast.insertFallback') : t('toast.copyFailed'), ok ? 'info' : 'error')
-          })
-          return
-        }
-        notify(t('toast.inserted'), 'success')
-        window.requestAnimationFrame(function focusComposer() {
-          const editor = document.querySelector('[data-composer-input]')
-          if (editor && typeof editor.focus === 'function') {
-            try {
-              editor.focus({ preventScroll: true })
-            } catch (error) {
-              /* focus is a nicety */
-            }
-          }
-        })
-      }
-
       function renderTip() {
         const tip = snapshot.tip
         if (!tip) return null
@@ -1186,30 +1345,17 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
         const toast = snapshot.toast
         if (!toast) return null
         const error = toast.kind === 'error'
-        const actionable = toast.action === 'insert' && snapshot.lastCapture !== null && snapshot.draftReady === true
         return h(
           'div',
           {
             key: 'toast-' + String(toast.seq),
-            className: 'dsh-toolbox-toast' + (error ? ' dsh-toolbox-toast-error' : '') + (actionable ? ' is-actionable' : ''),
+            className: 'dsh-toolbox-toast' + (error ? ' dsh-toolbox-toast-error' : ''),
             'data-dsh-toolbox-ui': '',
             role: 'status',
             'aria-live': 'polite'
           },
           h('span', { className: 'dsh-toolbox-toast-icon' }, error ? h(IconAlert, { size: 14 }) : h(IconCheck, { size: 14 })),
-          h('span', null, toast.text),
-          actionable
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dsh-toolbox-toast-action',
-                  'data-dsh-toolbox-ui': '',
-                  onClick: insertCaptured
-                },
-                t('toast.insert')
-              )
-            : null
+          h('span', null, toast.text)
         )
       }
 
@@ -1230,8 +1376,10 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     //#endregion
 
     return {
-      inject: ['slots', 'locale'],
+      inject: ['slots', 'locale', 'sessions', 'inputTriggers', 'uiConversation'],
       apply(ctx) {
+        sessionsService = ctx.get('sessions') || null
+
         ctx.effect(
           function registerLocale() {
             return ctx.locale.register(NS, { zh: zh, en: en })
@@ -1240,6 +1388,32 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
         )
 
         const t = ctx.locale.bind(NS)
+
+        ctx.effect(
+          function registerElementSource() {
+            return ctx.inputTriggers.registerSource(elementSource)
+          },
+          'toolbox: element trigger source'
+        )
+
+        ctx.effect(
+          function registerElementTextRule() {
+            return ctx.uiConversation.userText.register(elementTextRule)
+          },
+          'toolbox: element text rule'
+        )
+
+        ctx.slots.inject('conversation.user.text.node', function* injectElementChip() {
+          yield ctx.slots.register(
+            {
+              name: 'conversation.user.text.node',
+              key: 'elementRef',
+              priority: 100,
+              locale: NS
+            },
+            ElementReference
+          )
+        })
 
         ctx.slots.inject('shell.overlay', function injectHost() {
           return ctx.slots.register(

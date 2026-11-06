@@ -2,7 +2,7 @@
 
 [![npm](https://img.shields.io/npm/v/dsh-ui-toolbox.svg)](https://www.npmjs.com/package/dsh-ui-toolbox)
 
-A resident UI toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It sits at the bottom-left, above the sidebar Settings row, as a compact tray, and paints above host modals (the Settings dialog included), so it stays usable while Settings is open. Its first tool, the **Element Picker**, captures any element of the live Web UI — React component, CSS selector, box, text, attributes and key computed styles — copies the context to the clipboard, or inserts it straight into the current composer so a change request can follow.
+A resident UI toolbox for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It sits at the bottom-left, above the sidebar Settings row, as a compact tray, and paints above host modals (the Settings dialog included), so it stays usable while Settings is open. Its first tool, the **Element Picker**, captures any element of the live Web UI — React component, CSS selector, box, text, attributes and key computed styles — and inserts it into the current composer as a compact `@label` reference chip. The conversation shows only that chip; the full captured context still travels with the message for the model.
 
 DSH Web 界面左下角的**常驻工具托盘**。托盘位于侧边栏底部、设置上方：每个工具一个图标按钮，鼠标悬浮显示一句短提示；功能细节写在插件说明（`locale/*.json` 的 `meta.description`）里，托盘本身不占地方。托盘渲染在一个浮于宿主模态之上的 body portal 里，所以**打开设置窗口后仍然可用**，也可以直接采集设置面板里的元素。当前工具是**选取元素**。
 
@@ -20,14 +20,17 @@ Tested on DSH `0.2.1-rc.2`. The bundle declares `engines.dsh: ">=0.2.1-rc.2 <0.3
 
 1. 点托盘里的十字准星图标，进入选取模式；鼠标扫过界面元素会实时高亮。
 2. `↑` / `↓` 在父级 / 子级之间切换候选元素；单击采集，`Esc` 或再点一次托盘图标退出。
-3. 采集时自动把元素上下文复制到剪贴板，顶部弹出短提示：
-   - 有会话输入框时，点提示里的 **插入对话框** 可把上下文直接写进输入框，并带上「修改要求：」前缀；
-   - 也可以自己粘贴到对话框；
-   - 随后直接写修改要求，例如「把间距调大一点」「按钮换成次要样式」。
+3. 采集后，当前会话输入框里会插入一个紧凑的 `@标签` 引用 chip，可以连续采集多个元素：
+   - 对话里只显示小 chip，不会把整段元素上下文铺在消息里；
+   - 完整上下文仍随消息交给模型，直接接着写要求即可，例如「把这两个元素合并」「把按钮换成次要样式」；
+   - 没有会话输入框时（例如停在欢迎页）会改为复制完整引用到剪贴板。
 
 ## 采集的上下文
 
+chip 在提交时展开成下面这段交给模型（对话界面里仍然折叠成 chip）：
+
 ```text
+[[el:el-abc|设置]]
 （以下内容由 DSH 工具箱的元素选取器采集，来自当前 Web 界面）
 <selected-element>
 元素: <button class="…" aria-label="设置">
@@ -42,22 +45,25 @@ Tested on DSH `0.2.1-rc.2`. The bundle declares `engines.dsh: ">=0.2.1-rc.2 <0.3
 </selected-element>
 ```
 
-组件名来自 React fiber，选择器优先用 `id` / `data-*` / `aria-label`，样式取自 `getComputedStyle` 的关键项，结构片段只在元素较小时附带。这段文本对人和模型都可读，粘贴进对话框即可让 Agent 定位到元素并动手改。
+第一行的 `[[el:<id>|<label>]]` 是 chip 的定位标记，`</selected-element>` 收尾；对话渲染层把这两者之间的内容折叠成 chip，模型侧则拿到完整文本。采集结果按 id 缓存在浏览器 `localStorage`（`dsh-ui-toolbox.elements.v1`，上限 100 条、保留 7 天），因此同一次会话里可以连续引用多个元素。
 
 ## 插件结构 · Structure
 
 | 文件 | 作用 |
 | --- | --- |
-| `client.js` | 全部浏览器侧实现：常驻托盘、元素选取器、提示/高亮/toast、输入框桥接；托盘与瞬态 UI 通过 body portal 浮在宿主模态之上 |
+| `client.js` | 全部浏览器侧实现：常驻托盘、元素选取器、提示/高亮/toast、输入框桥接、`@` 引用 chip 的输入触发器与对话渲染规则；托盘与瞬态 UI 通过 body portal 浮在宿主模态之上 |
 | `index.js` | Host 半部，无资源（不需要服务端能力） |
 | `cordis.patch.yml` | 插入 `toolbox` 插件行 |
 | `locale/*.json` | 插件管理页的标题与详细说明（中/英） |
 | `icon.svg` | 插件图标（托盘里的工具图标画在 `client.js` 中） |
 
-挂载的槽位：
+挂载的槽位与注册：
 
 - `shell.overlay`：唯一的 UI 宿主。它把一个 body portal 挂到 `document.body`，portal 里包含托盘、悬浮提示、高亮框、选取提示条与 toast；元素 z-index 在宿主模态（设置窗口 `z-index: 1000`）之上，因此打开设置也能用。portal 里的元素各自 `pointer-events` 自理，不会挡住应用。
-- `conversation.composer.dock`：零高度桥接组件，把当前会话的 `InputActions` 暴露给根级 toast，实现「插入对话框」。
+- `conversation.composer.dock`：零高度桥接组件，拿到当前会话的 `inputActions` 与 `sessionId`，供托盘把 chip 插进输入框。
+- `conversation.user.text.node`（key `elementRef`）：用户消息里的元素引用渲染成小 chip。
+- `ctx.inputTriggers.registerSource`：注册 `@` 下的 `element` 引用源；提交时由它的 `codec.serialize` 把 chip 展开成完整上下文。
+- `ctx.uiConversation.userText.register`：注册 `elementRef` 文本规则，把 `[[el:…]] … </selected-element>` 折叠回 chip。
 
 ## 后续加工具
 
@@ -69,7 +75,7 @@ Tested on DSH `0.2.1-rc.2`. The bundle declares `engines.dsh: ">=0.2.1-rc.2 <0.3
 
 ## 约束
 
-- 运行时只用 `react` 和 `react-dom`（`createPortal`），不 import 任何 Harness Client 包；
+- 运行时只用 `react` 和 `react-dom`（`createPortal`），不 import 任何 Harness Client 包；输入触发器、会话输入框与对话渲染都走公开的 `ctx.inputTriggers` / `ctx.sessions` / `ctx.uiConversation` 服务；
 - 颜色/圆角/阴影全部取自 `--dsw-*` 主题 token（暗色、亮色自动适配）；
 - 所有文字走 `toolbox` locale 命名空间（中/英）；
 - 文档级监听器、定时器、样式都随 `ctx.effect` / React 卸载清理；采集期间临时挂在 `<html>` 上的 `data-dsh-toolbox-picking`（全屏十字光标）也会在退出时移除。

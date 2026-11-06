@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Toolbox",
-    "description": "A resident tool tray at the sidebar foot (bottom-left, above Settings). It paints above host modals, the Settings dialog included, so it stays usable while Settings is open; future tools join it as more icon buttons. The current tool, Element Picker: click the tray icon to pick, hover the live UI to highlight any element, use ↑/↓ to move between parent and child, and click to capture. Esc or a second click on the icon exits. The capture records the React component, CSS selector, size, text, attributes and key computed styles and copies it to the clipboard. The toast's Insert action writes that context straight into the current composer so a change request can follow."
+    "description": "A resident tool tray at the sidebar foot (bottom-left, above Settings). It paints above host modals, the Settings dialog included, so it stays usable while Settings is open; future tools join it as more icon buttons. The current tool, Element Picker: click the tray icon to pick, hover the live UI to highlight any element, use ↑/↓ to move between parent and child, and click to capture. Esc or a second click on the icon exits. Each capture is inserted into the current composer as a compact @label reference chip (capture several elements in a row); the conversation shows only a small chip, while the full captured context still travels with the message for the model. Type the change request after the chips. With no composer available the reference is copied instead."
   }
 }
