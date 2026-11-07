@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "type": "module",
   "main": "./index.js",
-  "description": "A resident UI toolbox for DeepSeek Harness. Its element picker captures any app element's React component, CSS selector, box, text and key styles, copies the context, and can insert it straight into the composer.",
+  "description": "A resident UI toolbox for DeepSeek Harness, parked in the sidebar footer next to the account row. Its element picker captures any app element's React component, CSS selector, box, text and key styles and inserts it into the composer as a compact reference chip; the full context still reaches the model.",
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -57,6 +57,7 @@
       "inject": [
         "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-conversation",
         "@deepseek-ai/dsh-client-ui-input-trigger"
       ]

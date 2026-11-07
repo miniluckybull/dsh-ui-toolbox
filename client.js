@@ -2,18 +2,24 @@
  * DSH UI Toolbox — browser half (dsh-ui-toolbox).
  *
  * Surfaces:
- *   1. shell.overlay        id "toolbox"         — hosts one body portal containing the
- *                                                  resident tray, the pick highlight,
- *                                                  hover tooltip, picking hint and the
- *                                                  result toast. The portal sits above
- *                                                  host modals (the Settings dialog uses
- *                                                  z-index 1000), so the tray and picker
- *                                                  stay usable with Settings open.
- *   2. conversation.composer.dock id "toolbox-bridge" — publishes the session's
+ *   1. sidebar.footer.action id "toolbox"        — the resident tool entry, rendered in the
+ *                                                  sidebar footer beside the account/Settings
+ *                                                  row. In wide mode the icon overlays the
+ *                                                  right end of that row and the host settings
+ *                                                  area is narrowed to make room; it never
+ *                                                  floats, so it cannot cover the task list,
+ *                                                  the account menu or the Settings dialog.
+ *   2. shell.overlay        id "toolbox"         — hosts one body portal with the transient
+ *                                                  picker UI: highlight box, hover tooltip,
+ *                                                  picking hint and result toast. The portal
+ *                                                  paints above host modals (Settings uses
+ *                                                  z-index 1000) so picking feedback stays
+ *                                                  visible; only the icon lives in the sidebar.
+ *   3. conversation.composer.dock id "toolbox-bridge" — publishes the session's
  *                                                  InputActions + session id so a capture
  *                                                  can insert a compact reference chip
  *                                                  into the composer.
- *   3. conversation.user.text.node key "elementRef" — renders one captured element in a
+ *   4. conversation.user.text.node key "elementRef" — renders one captured element in a
  *                                                  user message as a small chip instead of
  *                                                  the full context block; the model text
  *                                                  is unchanged.
@@ -21,12 +27,13 @@
  *   resolves the captured context at submit time) and a user-text rule that folds the
  *   serialized block back into the chip.
  *
- * Current tool: element picker. Click the tray icon, then hover the live UI (ArrowUp /
- * ArrowDown moves between parent and first child); a click captures the element's React
- * component chain, CSS selector, box, text, attributes and key computed styles and inserts
- * a compact `@label` chip into the current composer. The full context is stored locally and
- * travels with the message for the model, while the conversation shows only the chip. When
- * no composer is available the full reference is copied to the clipboard instead.
+ * Current tool: element picker. Click the sidebar footer icon, then hover the live UI
+ * (ArrowUp / ArrowDown moves between parent and first child); a click captures the
+ * element's React component chain, CSS selector, box, text, attributes and key computed
+ * styles and inserts a compact `@label` chip into the current composer. The full context is
+ * stored locally and travels with the message for the model, while the conversation shows
+ * only the chip. When no composer is available the full reference is copied to the
+ * clipboard instead.
  *
  * The detailed feature description lives in this bundle's locale `meta.description`
  * (the plugin inventory entry); the tray itself only carries the icon, a short tooltip
@@ -34,8 +41,8 @@
  *
  * Constraints: one browser-global file, no JSX, `react` and `react-dom` are the only
  * modules required at runtime, no harness package imports, colors exclusively through
- * --dsw-* theme tokens. The body portal mirrors the host's own modal pattern; it is the
- * only way to paint above a host modal that portals itself to document.body.
+ * --dsw-* theme tokens. The body portal is only used for the transient picker feedback;
+ * it is the one way to paint above a host modal that portals itself to document.body.
  */
 window.__ModuleLoader__.load({
   id: 'dsh-ui-toolbox',
@@ -140,23 +147,34 @@ window.__ModuleLoader__.load({
     let swallowUntil = 0
 
     const CSS = `
-.dsh-toolbox-tray {
-  position: fixed;
-  z-index: 1102;
-  left: 12px;
-  bottom: 54px;
+/* Sidebar footer entry. It lives in the sidebar's own footer slot (below host
+   modals) so it can never float over the task list, the account menu or the
+   Settings dialog. In wide mode it overlays the right end of the account row;
+   the host settings area is narrowed to match while this entry is mounted. */
+.dsh-toolbox-foot {
   box-sizing: border-box;
-  display: inline-flex;
-  flex: none;
-  flex-direction: row;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--dsw-alias-border-l1);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-button-elevated-fill);
-  box-shadow: var(--dsw-elevation-soft);
+  position: relative;
+  display: flex;
+  pointer-events: none;
 }
+.dsh-toolbox-foot > .dsh-toolbox-tool { pointer-events: auto; }
+.dsh-toolbox-foot-float {
+  width: 100%;
+  height: 0;
+  justify-content: flex-end;
+}
+.dsh-toolbox-foot-float > .dsh-toolbox-tool {
+  position: absolute;
+  top: 8px;
+  right: 2px;
+  width: 28px;
+  height: 28px;
+}
+.dsh-toolbox-foot:not(.dsh-toolbox-foot-float) > .dsh-toolbox-tool {
+  width: 36px;
+  height: 36px;
+}
+html[data-dsh-toolbox-footer] [class*="settingsArea"] { width: calc(100% - 38px); }
 .dsh-toolbox-tool {
   display: inline-flex;
   align-items: center;
@@ -1018,15 +1036,30 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     }
 
     /**
-     * The resident tray. It lives in the body portal hosted by {@link ToolboxHost},
-     * pinned to the bottom-left above the sidebar Settings row, so it also stays
-     * reachable while a host modal such as Settings is open. One cell per tool; the
-     * icon is the whole entry, the short label lives in the hover tooltip.
+     * The resident entry in the sidebar footer (`sidebar.footer.action`),
+     * rendered to the right of the account/Settings row. Living inside the
+     * sidebar's own layout keeps it below host modals, so it never covers the
+     * task list, the account menu or the Settings dialog. One cell per tool;
+     * the icon is the whole entry, the short label lives in the hover tooltip.
      */
-    function ToolboxTray(props) {
+    function ToolboxFooter(props) {
       const t = typeof props.t === 'function' ? props.t : function fallback(key) { return key }
       const snapshot = useStore()
       const picking = snapshot.picking === true
+      const wide = props.wide !== false
+
+      // In wide mode the icon overlays the right end of the account row, so the
+      // host settings area is narrowed while this entry is mounted.
+      React.useEffect(
+        function reserveFooterSpace() {
+          if (!wide) return undefined
+          document.documentElement.setAttribute('data-dsh-toolbox-footer', '')
+          return function releaseFooterSpace() {
+            document.documentElement.removeAttribute('data-dsh-toolbox-footer')
+          }
+        },
+        [wide]
+      )
 
       function togglePicking() {
         if (state.picking) {
@@ -1049,9 +1082,7 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       return h(
         'div',
         {
-          className: 'dsh-toolbox-tray',
-          role: 'toolbar',
-          'aria-label': t('tray.label'),
+          className: 'dsh-toolbox-foot' + (wide ? ' dsh-toolbox-foot-float' : ''),
           'data-dsh-toolbox-ui': ''
         },
         tools.map(function renderTool(tool) {
@@ -1093,10 +1124,10 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     }
 
     /**
-     * Frame-wide toolbox surface. It renders through a body portal (the same
-     * technique the host Settings dialog uses) so the tray, highlight, tooltip,
-     * picking hint and toast paint above host modals; without the portal the
-     * Settings dialog's z-index-1000 layer would cover the whole toolbox.
+     * Frame-wide transient surface for the picker. The tool icon itself lives in
+     * the sidebar footer; this portal only carries the highlight box, hover
+     * tooltip, picking hint and result toast, which must paint above host modals
+     * while picking. Its stylesheet ships with this surface and is global.
      */
     function ToolboxHost(props) {
       const t = typeof props.t === 'function' ? props.t : function fallback(key) { return key }
@@ -1364,7 +1395,6 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
           React.Fragment,
           null,
           h('style', { key: 'style' }, CSS),
-          h(ToolboxTray, { key: 'tray', t: t }),
           snapshot.picking ? renderPickBar() : null,
           snapshot.picking ? renderHighlight() : null,
           renderTip(),
@@ -1412,6 +1442,18 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
               locale: NS
             },
             ElementReference
+          )
+        })
+
+        ctx.slots.inject('sidebar.footer.action', function injectFooterAction() {
+          return ctx.slots.register(
+            {
+              name: 'sidebar.footer.action',
+              id: 'toolbox',
+              order: 30,
+              locale: NS
+            },
+            ToolboxFooter
           )
         })
 
