@@ -165,7 +165,7 @@ window.__ModuleLoader__.load({
 }
 .dsh-toolbox-foot-float > .dsh-toolbox-tool {
   position: absolute;
-  top: 8px;
+  top: 12px;
   right: 2px;
   width: 28px;
   height: 28px;
