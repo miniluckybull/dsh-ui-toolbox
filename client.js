@@ -32,8 +32,9 @@
  * element's React component chain, CSS selector, box, text, attributes and key computed
  * styles and inserts a compact `@label` chip into the current composer. The full context is
  * stored locally and travels with the message for the model, while the conversation shows
- * only the chip. When no composer is available the full reference is copied to the
- * clipboard instead.
+ * only the chip. A capture made while no chat composer is on screen (Settings, Plugins, the
+ * welcome page) is queued in memory and inserted as chips as soon as a composer appears, so
+ * nothing ever has to be pasted as a wall of text.
  *
  * The detailed feature description lives in this bundle's locale `meta.description`
  * (the plugin inventory entry); the tray itself only carries the icon, a short tooltip
@@ -60,9 +61,8 @@ window.__ModuleLoader__.load({
       'picking.hint': '单击采集 · ↑↓ 切换层级 · Esc 取消',
       'picking.cancel': '退出选取',
       'toast.elementAdded': '已添加元素引用',
-      'toast.elementCopied': '已复制元素引用',
-      'toast.copyFailed': '复制失败，请重试',
-      'toast.noComposer': '没有会话输入框，已复制元素引用',
+      'toast.elementQueued': '已暂存元素引用，进入会话后自动插入',
+      'toast.queuedInserted': '已插入暂存的元素引用',
       'ctx.element': '元素',
       'ctx.component': '组件',
       'ctx.selector': '选择器',
@@ -82,9 +82,8 @@ window.__ModuleLoader__.load({
       'picking.hint': 'Click to capture · ↑↓ change level · Esc to cancel',
       'picking.cancel': 'Stop picking',
       'toast.elementAdded': 'Element reference added',
-      'toast.elementCopied': 'Element reference copied',
-      'toast.copyFailed': 'Copy failed, please retry',
-      'toast.noComposer': 'No composer available, element reference copied',
+      'toast.elementQueued': 'Element reference saved — it will be inserted when you open a chat',
+      'toast.queuedInserted': 'Saved element references inserted',
       'ctx.element': 'element',
       'ctx.component': 'component',
       'ctx.selector': 'selector',
@@ -512,6 +511,43 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       return 'failed'
     }
 
+    /**
+     * Captures made while no chat composer is mounted (Settings, Plugins, the
+     * welcome screen) wait here. As soon as a chat composer appears they are
+     * inserted as chips automatically, so nothing has to be pasted as text.
+     */
+    const pendingElementRefs = []
+
+    function queuePendingElementRef(entry) {
+      const exists = pendingElementRefs.some(function same(ref) {
+        return ref.id === entry.id
+      })
+      if (!exists) pendingElementRefs.push({ id: entry.id, label: entry.label })
+    }
+
+    /**
+     * Adopt queued references into the mounted composer.
+     * @param translate - locale lookup used for the result toast.
+     * @returns number of references inserted now.
+     */
+    function flushPendingElementRefs(translate) {
+      if (pendingElementRefs.length === 0 || !bridge.inputActions || !bridge.sessionId) return 0
+      let inserted = 0
+      const remaining = []
+      pendingElementRefs.forEach(function attempt(ref) {
+        if (insertElementChip(ref.id, ref.label) === 'inserted') inserted += 1
+        else remaining.push(ref)
+      })
+      pendingElementRefs.length = 0
+      remaining.forEach(function keep(ref) {
+        pendingElementRefs.push(ref)
+      })
+      if (inserted > 0 && typeof translate === 'function') {
+        notify(translate('toast.queuedInserted'), 'success')
+      }
+      return inserted
+    }
+
     /** Collapse one serialized element block back to a compact chat chip. */
     const elementTextRule = {
       id: 'elementRef',
@@ -858,41 +894,6 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
       )
     }
 
-    function copyText(text) {
-      return new Promise(function executor(resolve) {
-        function fallback() {
-          try {
-            const area = document.createElement('textarea')
-            area.value = text
-            area.setAttribute('readonly', '')
-            area.style.cssText = 'position:fixed;top:-9999px;left:-9999px;opacity:0;pointer-events:none;'
-            document.body.appendChild(area)
-            area.select()
-            const ok = document.execCommand('copy')
-            document.body.removeChild(area)
-            resolve(ok === true)
-          } catch (error) {
-            resolve(false)
-          }
-        }
-        try {
-          if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function' && window.isSecureContext) {
-            navigator.clipboard.writeText(text).then(
-              function copied() {
-                resolve(true)
-              },
-              function failed() {
-                fallback()
-              }
-            )
-            return
-          }
-        } catch (error) {
-          /* fall through to the legacy copy path */
-        }
-        fallback()
-      })
-    }
     //#endregion
 
     //#region icons
@@ -1105,11 +1106,28 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
     function ComposerBridge(props) {
       const actions = props.inputActions || null
       const sessionId = props.sessionId || null
+      const tRef = React.useRef(typeof props.t === 'function' ? props.t : null)
+
+      React.useEffect(
+        function syncTranslator() {
+          tRef.current = typeof props.t === 'function' ? props.t : null
+        },
+        [props.t]
+      )
 
       React.useEffect(
         function bindComposer() {
           bridge.inputActions = actions
           bridge.sessionId = sessionId
+          if (actions && sessionId) {
+            // A chat composer just appeared: adopt captures queued on other
+            // views, then retry once after paint in case the editor was still
+            // settling when this effect ran.
+            flushPendingElementRefs(tRef.current)
+            window.requestAnimationFrame(function retryQueuedRefs() {
+              if (bridge.inputActions === actions && bridge.sessionId === sessionId) flushPendingElementRefs(tRef.current)
+            })
+          }
           return function unbindComposer() {
             if (bridge.inputActions === actions) {
               bridge.inputActions = null
@@ -1196,6 +1214,7 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
             swallowUntil = Date.now() + 600
             const outcome = insertElementChip(entry.id, entry.label)
             if (outcome === 'inserted') {
+              flushPendingElementRefs(translate)
               notify(tRef.current('toast.elementAdded'), 'success')
               // Move focus back to the composer so the user can type the
               // change request right after the chips.
@@ -1211,10 +1230,13 @@ html[data-dsh-toolbox-picking] * { cursor: crosshair !important; }
               })
               return
             }
-            copyText(serializeElementRef(entry)).then(function copied(ok) {
-              const messageKey = ok ? (outcome === 'no-composer' ? 'toast.noComposer' : 'toast.elementCopied') : 'toast.copyFailed'
-              notify(tRef.current(messageKey), ok ? 'info' : 'error')
-            })
+            // No composer on screen (Settings, Plugins, welcome…) or the
+            // composer refused the edit: keep the reference and insert it as
+            // soon as a chat composer appears, instead of pasting a long block.
+            queuePendingElementRef(entry)
+            if (flushPendingElementRefs(translate) === 0) {
+              notify(tRef.current('toast.elementQueued'), 'info')
+            }
           }
 
           function onPointerDown(event) {
